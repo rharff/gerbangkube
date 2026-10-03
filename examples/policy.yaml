@@ -1,0 +1,10 @@
+apiVersion: gerbangkube.example.io/v1alpha1
+kind: ImageSignaturePolicy
+metadata:
+  name: require-signed-images
+spec:
+  imageReferences:
+    - ghcr.io/example/*
+  publicKeySecretRef:
+    name: cosign-public-key
+    key: cosign.pub

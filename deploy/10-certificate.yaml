@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: gerbangkube-selfsigned
+  namespace: gerbangkube-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gerbangkube-tls
+  namespace: gerbangkube-system
+spec:
+  secretName: gerbangkube-tls
+  issuerRef:
+    name: gerbangkube-selfsigned
+  dnsNames:
+    - gerbangkube
+    - gerbangkube.gerbangkube-system.svc
+    - gerbangkube.gerbangkube-system.svc.cluster.local

@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gerbangkube
+  namespace: gerbangkube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gerbangkube-policy-reader
+rules:
+  - apiGroups: [gerbangkube.example.io]
+    resources: [imagesignaturepolicies]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gerbangkube-secret-reader
+  namespace: gerbangkube-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gerbangkube-policy-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gerbangkube-policy-reader
+subjects:
+  - kind: ServiceAccount
+    name: gerbangkube
+    namespace: gerbangkube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gerbangkube-secret-reader
+  namespace: gerbangkube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gerbangkube-secret-reader
+subjects:
+  - kind: ServiceAccount
+    name: gerbangkube
+    namespace: gerbangkube-system
