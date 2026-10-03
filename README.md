@@ -22,8 +22,126 @@ Tidak ada akses Rekor, TUF, TSA, atau keyless verification.
 
 ## Instalasi di k3s
 
-Prasyarat: cert-manager telah terpasang dan image controller tersedia pada
-registry yang dapat diakses semua node.
+Bagian ini membutuhkan akses administrator ke cluster, `kubectl`, Helm, Docker
+atau BuildKit, serta akses ke registry image.
+
+### Persiapan cert-manager
+
+Pasang cert-manager melalui Helm sebelum menerapkan
+`deploy/10-certificate.yaml`:
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --set crds.enabled=true
+kubectl -n cert-manager wait --for=condition=Available \
+  deployment/cert-manager \
+  deployment/cert-manager-cainjector \
+  deployment/cert-manager-webhook \
+  --timeout=120s
+```
+
+Pastikan release `cert-manager` berstatus `deployed` sebelum melanjutkan.
+
+### Persiapan image controller
+
+Build image dari root repository, beri tag sesuai registry yang akan digunakan,
+lalu push image tersebut:
+
+```bash
+export CONTROLLER_IMAGE=ghcr.io/<org>/gerbangkube:0.1.0
+docker build -t "$CONTROLLER_IMAGE" .
+docker push "$CONTROLLER_IMAGE"
+```
+
+Ubah field `spec.template.spec.containers[0].image` pada
+`deploy/30-deployment.yaml` agar sama dengan nilai `CONTROLLER_IMAGE`.
+Registry harus dapat diakses oleh seluruh node k3s. Untuk cluster single-node,
+image juga dapat dimuat langsung ke containerd:
+
+```bash
+docker save "$CONTROLLER_IMAGE" | sudo k3s ctr images import -
+```
+
+Untuk cluster multi-node, gunakan registry bersama; import image hanya pada
+satu node tidak cukup.
+
+### Memberikan credential registry ke gerbangkube
+
+`docker login` hanya menyimpan credential di mesin lokal, biasanya pada
+`~/.docker/config.json`. Credential tersebut belum otomatis tersedia di Pod
+Kubernetes. Salin konfigurasi Docker itu ke Secret pada namespace
+`gerbangkube-system`:
+
+```bash
+kubectl apply -f deploy/00-namespace.yaml
+
+# Jalankan docker login terlebih dahulu jika belum dilakukan.
+docker login ghcr.io
+
+kubectl -n gerbangkube-system create secret generic ghcr-read-auth \
+  --from-file=config.json="$HOME/.docker/config.json" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Untuk GHCR, gunakan token read-only dengan scope `read:packages`. Hindari
+menaruh token langsung di file manifest atau command yang tersimpan di shell
+history. Jika `config.json` berisi credential registry lain, buat file khusus
+yang hanya memuat entry `ghcr.io` sebelum membuat Secret.
+
+Konfigurasi mount Secret dan flag `--docker-config-dir=/registry-auth` sudah
+tersedia langsung di [deploy/30-deployment.yaml](/home/rahan/Kuliah/Eksperimen/gerbangkube/deploy/30-deployment.yaml).
+Setelah Secret dibuat, terapkan Deployment:
+
+```bash
+kubectl apply -f deploy/30-deployment.yaml
+kubectl -n gerbangkube-system rollout status deploy/gerbangkube
+```
+
+Secret `ghcr-read-auth` dipakai gerbangkube untuk mengambil manifest, referrer,
+dan bundle signature. Secret ini berbeda dari `imagePullSecrets` milik
+workload. Jika workload juga memerlukan credential untuk menarik image private,
+buat atau pasang `imagePullSecrets` pada namespace/workload tersebut secara
+terpisah.
+
+Periksa bahwa Secret sudah tersedia dan Pod berhasil membaca mount-nya:
+
+```bash
+kubectl -n gerbangkube-system get secret ghcr-read-auth
+kubectl -n gerbangkube-system describe pod -l app=gerbangkube
+kubectl -n gerbangkube-system logs deploy/gerbangkube
+```
+
+### Pemeriksaan jaringan dan RBAC
+
+Sebelum memasang `ValidatingWebhookConfiguration`, pastikan:
+
+- API server dapat mencapai Service `gerbangkube` pada port 443.
+- Pod gerbangkube dapat melakukan koneksi HTTPS keluar ke registry.
+- Firewall node tidak memblokir trafik dari CIDR Pod dan Service k3s.
+- ServiceAccount gerbangkube dapat membaca `ImageSignaturePolicy`.
+- ServiceAccount gerbangkube hanya membaca Secret pada namespace
+  `gerbangkube-system`.
+
+Setelah resource dasar diterapkan, verifikasi identitas dan permission:
+
+```bash
+kubectl auth can-i list imagesignaturepolicies \
+  --as=system:serviceaccount:gerbangkube-system:gerbangkube
+kubectl auth can-i list secrets -n gerbangkube-system \
+  --as=system:serviceaccount:gerbangkube-system:gerbangkube
+kubectl auth can-i list secrets -n default \
+  --as=system:serviceaccount:gerbangkube-system:gerbangkube
+```
+
+Perintah terakhir seharusnya menghasilkan `no`.
+
+Sebelum instalasi, pastikan cert-manager berstatus `deployed`, image controller
+tersedia untuk semua node, registry dapat diakses, dan public key serta pola
+image pada contoh sudah diganti.
 
 ```bash
 kubectl apply -f deploy/00-namespace.yaml

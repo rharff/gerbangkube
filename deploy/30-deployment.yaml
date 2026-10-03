@@ -26,7 +26,7 @@ metadata:
   name: gerbangkube
   namespace: gerbangkube-system
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels: {app: gerbangkube}
   template:
@@ -36,8 +36,10 @@ spec:
       serviceAccountName: gerbangkube
       containers:
         - name: gerbangkube
-          image: ghcr.io/rharff/gerbangkube:1
-          args: ["--listen-address=:8443"]
+          image: ghcr.io/rharff/gerbangkube:5
+          args:
+            - --listen-address=:8443
+            - --docker-config-dir=/registry-auth
           ports:
             - name: https
               containerPort: 8443
@@ -52,7 +54,11 @@ spec:
             capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: tls, mountPath: /tls, readOnly: true}
+            - {name: registry-auth, mountPath: /registry-auth, readOnly: true}
       volumes:
         - name: tls
           secret:
             secretName: gerbangkube-tls
+        - name: registry-auth
+          secret:
+            secretName: ghcr-read-auth

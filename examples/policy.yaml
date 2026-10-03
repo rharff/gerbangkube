@@ -4,7 +4,7 @@ metadata:
   name: require-signed-images
 spec:
   imageReferences:
-    - ghcr.io/example/*
+    - ghcr.io/rharff/*
   publicKeySecretRef:
     name: cosign-public-key
     key: cosign.pub
