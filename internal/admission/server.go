@@ -39,8 +39,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	var review admissionv1.AdmissionReview
-	if err := json.NewDecoder(r.Body).Decode(&review); err != nil || review.Request == nil {
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	if err := decoder.Decode(&review); err != nil || review.Request == nil {
 		http.Error(w, "invalid AdmissionReview", http.StatusBadRequest)
 		return
 	}
@@ -86,21 +88,28 @@ func (s *Server) decide(req *admissionv1.AdmissionRequest) *admissionv1.Admissio
 func (s *Server) verifyOne(image string, p policy.Policy) (string, string, error) {
 	keyID := string(p.PublicKeyPEM)
 	cacheKey := image + "|" + p.Name + "|" + keyID
-	s.mu.Lock()
-	entry, ok := s.cache[cacheKey]
-	if ok && time.Now().Before(entry.expires) {
+	// A tag can be repointed in the registry. Only cache digest-pinned
+	// references, whose content identity cannot change.
+	cacheable := strings.Contains(image, "@sha256:")
+	if cacheable {
+		s.mu.Lock()
+		entry, ok := s.cache[cacheKey]
+		if ok && time.Now().Before(entry.expires) {
+			s.mu.Unlock()
+			return "", "signature valid (cache)", nil
+		}
+		delete(s.cache, cacheKey)
 		s.mu.Unlock()
-		return "", "signature valid (cache)", nil
 	}
-	delete(s.cache, cacheKey)
-	s.mu.Unlock()
 	result, err := s.verifier.Verify(image, p.PublicKeyPEM)
 	if err != nil {
 		return result.Digest, classify(err), err
 	}
-	s.mu.Lock()
-	s.cache[cacheKey] = cacheEntry{expires: time.Now().Add(s.ttl)}
-	s.mu.Unlock()
+	if cacheable {
+		s.mu.Lock()
+		s.cache[cacheKey] = cacheEntry{expires: time.Now().Add(s.ttl)}
+		s.mu.Unlock()
+	}
 	return result.Digest, "signature valid", nil
 }
 

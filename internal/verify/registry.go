@@ -3,6 +3,7 @@ package verify
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,6 +24,9 @@ type HTTPRegistry struct {
 }
 
 func NewRegistry(client *http.Client, dockerConfigDir string) *HTTPRegistry {
+	if client == nil {
+		client = http.DefaultClient
+	}
 	r := &HTTPRegistry{client: client}
 	if dockerConfigDir != "" {
 		data, err := os.ReadFile(filepath.Join(dockerConfigDir, "config.json"))
@@ -182,18 +186,7 @@ func (r *HTTPRegistry) Resolve(ref string) (string, error) {
 	if digest != "" {
 		return digest, nil
 	}
-	var manifest struct {
-		Config struct {
-			Digest string `json:"digest"`
-		} `json:"config"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return "", err
-	}
-	if manifest.Config.Digest == "" {
-		return "", fmt.Errorf("registry response has no digest")
-	}
-	return manifest.Config.Digest, nil
+	return "", fmt.Errorf("registry response has no Docker-Content-Digest")
 }
 
 func (r *HTTPRegistry) Bundle(ref, digest string) ([]byte, error) {
@@ -208,7 +201,7 @@ func (r *HTTPRegistry) Bundle(ref, digest string) ([]byte, error) {
 				MediaType    string `json:"mediaType"`
 			} `json:"manifests"`
 		}
-		if json.NewDecoder(resp.Body).Decode(&index) == nil {
+		if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&index) == nil {
 			for _, m := range index.Manifests {
 				if isSignatureDescriptor(m.ArtifactType, m.MediaType) {
 					return r.bundleFromManifest(host, repository, m.Digest)
@@ -266,6 +259,9 @@ func (r *HTTPRegistry) bundleFromManifest(host, repository, digest string) ([]by
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("signature manifest returned %s", resp.Status)
+	}
 	var manifest struct {
 		Layers []struct {
 			Digest string `json:"digest"`
@@ -274,7 +270,7 @@ func (r *HTTPRegistry) bundleFromManifest(host, repository, digest string) ([]by
 			Digest string `json:"digest"`
 		} `json:"blobs"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&manifest); err != nil {
 		return nil, err
 	}
 	digests := manifest.Layers
@@ -293,7 +289,7 @@ func (r *HTTPRegistry) bundleFromManifest(host, repository, digest string) ([]by
 		return nil, fmt.Errorf("cannot download signature bundle: %s", layer.Status)
 	}
 	var bundle json.RawMessage
-	if err := json.NewDecoder(layer.Body).Decode(&bundle); err != nil {
+	if err := json.NewDecoder(io.LimitReader(layer.Body, 1<<20)).Decode(&bundle); err != nil {
 		return nil, err
 	}
 	return bundle, nil

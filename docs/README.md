@@ -161,8 +161,10 @@ controller dengan `--docker-config-dir=/registry-auth`; token hanya perlu
 memiliki hak baca package.
 
 Policy dan Secret dimuat ulang setiap 10 detik, sehingga perubahan berlaku tanpa
-restart. Cache hanya menyimpan verifikasi sukses selama 10 menit; kegagalan
-tidak di-cache. Jika controller tidak tersedia, webhook menggunakan
+restart. Cache hanya menyimpan verifikasi sukses selama 10 menit untuk referensi
+image yang dipin ke digest; referensi berbasis tag selalu diverifikasi ulang agar
+tag yang dipindahkan tidak mempertahankan keputusan lama. Kegagalan tidak di-cache.
+Jika controller tidak tersedia, webhook menggunakan
 `failurePolicy: Fail` dan Pod baru di namespace tercakup ditolak.
 
 Untuk pemulihan darurat:

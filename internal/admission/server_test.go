@@ -29,3 +29,51 @@ func TestDecideSkipsImagesOutsidePolicy(t *testing.T) {
 		t.Fatalf("expected allowed without verification: %#v calls=%d", resp, v.calls)
 	}
 }
+
+func TestDecideDoesNotCacheTagVerification(t *testing.T) {
+	store := policy.NewStore()
+	store.ReplacePolicies([]policy.Policy{{Name: "p", References: []string{"ghcr.io/acme/*"}}})
+	v := &fakeVerifier{}
+	s := NewServer(store, v, nil)
+	raw, _ := json.Marshal(map[string]any{
+		"metadata": map[string]string{"name": "p"},
+		"spec": map[string]any{
+			"containers": []any{map[string]string{"image": "ghcr.io/acme/app:latest"}},
+		},
+	})
+	req := &admissionv1.AdmissionRequest{
+		Operation: admissionv1.Create,
+		Resource:  metav1.GroupVersionResource{Resource: "pods"},
+		Object:    runtime.RawExtension{Raw: raw},
+	}
+	if !s.decide(req).Allowed || !s.decide(req).Allowed {
+		t.Fatal("expected tagged image to be allowed")
+	}
+	if v.calls != 2 {
+		t.Fatalf("expected tag verification on every request, got %d calls", v.calls)
+	}
+}
+
+func TestDecideCachesDigestPinnedVerification(t *testing.T) {
+	store := policy.NewStore()
+	store.ReplacePolicies([]policy.Policy{{Name: "p", References: []string{"ghcr.io/acme/*"}}})
+	v := &fakeVerifier{}
+	s := NewServer(store, v, nil)
+	raw, _ := json.Marshal(map[string]any{
+		"metadata": map[string]string{"name": "p"},
+		"spec": map[string]any{
+			"containers": []any{map[string]string{"image": "ghcr.io/acme/app@sha256:abc"}},
+		},
+	})
+	req := &admissionv1.AdmissionRequest{
+		Operation: admissionv1.Create,
+		Resource:  metav1.GroupVersionResource{Resource: "pods"},
+		Object:    runtime.RawExtension{Raw: raw},
+	}
+	if !s.decide(req).Allowed || !s.decide(req).Allowed {
+		t.Fatal("expected digest-pinned image to be allowed")
+	}
+	if v.calls != 1 {
+		t.Fatalf("expected digest verification to be cached, got %d calls", v.calls)
+	}
+}
